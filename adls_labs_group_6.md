@@ -9,7 +9,7 @@
 In Tutorial 5, we implemented the NAS(neural Architecture Search) using optuna with different search sampler including Grid, Random and TPE-based search. 
 
 #### Task 1
-In task 1, we assessed the accuracy and efficiency accross between TPE and Grid samplers by running NAS for 100 trials and plot the accuracy of best model structure against trials. The result is shwon below:
+In task 1, we assessed the accuracy and efficiency accross between TPE and Grid samplers by running NAS for 30 trials and plot the accuracy of best model structure against trials. The result is shwon below:
 
 
 
@@ -23,6 +23,18 @@ The primary objective of this task is to obtain an efficient model that maintain
 
 **The comparison of result are shown below.**
 
+Figure 1 illustrates the search trajectory of the three different workflows over 30 trials. The specific trends for each curve are analyzed below:
+
+![Figure 1: Curves for the three workflows](imgs/nas_comparison_curve.png)
+
+* **Curve 1: Baseline (Standard NAS without Compression)**
+    Represented by the **blue curve**, this trajectory serves as the performance benchmark (FP32 accuracy). It remains relatively stable and high (~0.86) which is selected dut to the **TPESampler()** is verified to obtain the best result from task1. However, since this workflow ignores compression entirely, this curve represents a "theoretical upper bound" for uncompressed models, serving as a reference point to measure the impact of quantization and pruning in the other tasks.
+
+* **Curve 2: Compression-Aware Search (Without Post-Compression Training)**
+    The **orange curve** demonstrates the highest volatility. It starts with a significantly low accuracy (~0.53), revealing that unoptimized architectures have a high inherent sensitivity to compression without being retrained. However, the curve's rapid ascent proves that the search algorithm successfully identified architectures with high native robustness. Despite this improvement, the curve plateaus below the Baseline (Curve 1), confirming that relying solely on architectural robustness is insufficient to fully recover the accuracy lost during compression.
+
+* **Curve 3: Compression-Aware Search (With Post-Compression Training)**
+    The **green curve** represents the optimal workflow. It outperforms Curve 2, verifying that retraining is essential for recovering accuracy. Most notably, this curve eventually surpasses the Baseline (Curve 1), achieving the highest final accuracy (~0.87). This may caused by additional training epochs brought by retraining process. Also the combination of compression constraints and additional retraining may acted as a form of regularization, helping the model generalize better on the dataset than the standard FP32 model.
 
 
 ## Lab 3

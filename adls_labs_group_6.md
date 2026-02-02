@@ -98,5 +98,184 @@ Figure 1 illustrates the search trajectory of the three different workflows over
 ## Lab 3
 
 ## Lab 4
+### 1.a
+#### Analysis
+The observation that the first run yields no speedup (or is even slower) is an expected behavior due to the Just-In-Time compilation overhead inherent to `torch.compile()`. The optimization process executes only when the model is first called with data. This process involves three distinct stages:
+1. TorchDynamo: Upon the first execution, TorchDynamo analyzes the code to separate PyTorch operations from standard Python code and constructs an FX Graph. This graph capture process is generally efficient and does not significantly contribute to the latency.
+
+2. Autograd: AOT Autograd generate backward graph according to forward graph to ensure gradients can be calculated correctly during training. This step also consumes an acceptable amount of time.
+
+3. TorchInductor: The most time-consuming stage is TorchInductor, which acts as the compiler. It lowers the FX graph into optimized assembly code:
+
+ - On CPU: It generates C++ code and compiles it into machine code using GCC or LLVM.
+
+ - On GPU: It generates Triton kernels and compiles NVCC
+#### Result
+Following table illustrate the result comparing first run and subsequent run of torch.compile() on CPU
+|Models | First Run | Subsequent Run |
+| :--- | :----: | ---: |
+| Raw model (CPU)| 3.7306s | 3.5491s |
+| Optimized model (CPU) | 3.8752s |  2.1237s|
+
+### 1.b
+When changing device to NVIDIA RTX A6000。
+|Models | First Run | Subsequent Run |
+| :--- | :----: | ---: |
+| Raw model (GPU)| 0.1907s | 0.0251s |
+| Optimized model (GPU) | 3.1104s |  0.0201s|
 
 
+Still, the significant latency observed in the first run is due to the compilation overhead of stages in `torch.compile()`
+
+For the subsequent acceleration, the speedup on GPU is limited. For analysis, i would say PyTorch's already leverages highly optimized libraries (e.g., cuBLAS, cuDNN) for compute-bound operations. Therefore, the potential for further optimization via Kernal fusion is limited.
+
+### 2.a
+```
+import torch.utils.benchmark as benchmark
+
+device = "cpu"
+
+#....
+
+model_unfused = ScaledDotProductAttention()
+model_fused = ScaledDotProductAttentionFused()
+num_threads = 1 
+
+print(f"\n start (Threads={num_threads})...")
+
+t0 = benchmark.Timer(
+    stmt='fn(q, k, v)',
+    globals={'fn': model_unfused, 'q': query, 'k': key, 'v': value},
+    num_threads=num_threads,
+    label='Attention Comparison',
+    sub_label='Unfused (Baseline)',
+    description='shape=(32,8,128,64), fp16'
+)
+
+t1 = benchmark.Timer(
+    stmt='fn(q, k, v)',
+    globals={'fn': model_fused, 'q': query, 'k': key, 'v': value},
+    num_threads=num_threads,
+    label='Attention Comparison',
+    sub_label='Fused (Optimized)',
+    description='shape=(32,8,128,64), fp16'
+)
+
+res_unfused = t0.blocked_autorange(min_run_time=1.0)
+res_fused = t1.blocked_autorange(min_run_time=1.0)
+print(res_unfused)
+print(res_fused)
+
+# compare speedup
+time_unfused = res_unfused.median
+time_fused = res_fused.median
+speedup = time_unfused / time_fused
+
+print("-" * 40)
+print(f"Result Summary:")
+print(f"Unfused Time: {time_unfused * 1000:.4f} ms")
+print(f"Fused Time:   {time_fused * 1000:.4f} ms")
+print(f"🚀 Speedup:   {speedup:.2f}x")
+print("-" * 40)
+```
+Above code compares the fused_kernal with naive kernal on speed using  `torch_benchmark_timer`.
+Result are shown in below.
+|kernal | time | speedup|
+| :--- | :----: | ---: |
+| Naive kernal| 301.6185ms | |
+| Fused kernal | 53.6211 ms | 5.62x|
+
+### 2.b
+By switch device to cuda, result shows an huge background speedup ~3000x speedup for naive kernal imlementation. 
+
+Still, fused kernal is better than naive implementation, whith 3.19x speedup
+|kernal | time | speedup|
+| :--- | :----: | ---: |
+| Naive kernal|0.1075 ms | |
+| Fused kernal | 0.0337 ms| 3.19x|
+
+### 3.a
+If quantized weight and activation from FP to MXINT8, the computing power would increase, MXINT8 is bascally in form of 8-bit integer (effective bitwidth change little bit with block_size) so hardware designers can fit more of them onto the same size chip.
+Also, MXINT8 saves compute from sharing exponent, but the expressive power for each number is still 16bit(1 bit sign, 8bit exp and 8bit of mantissa). so this keeps accuracy which is important for model.
+
+
+### 3.b
+
+
+Dequantization Logic: MXINT8 to BF16This section demonstrates the step-by-step logic for dequantizing MXINT8  into BFloat16 format.
+
+
+The key here is to correctly handling the Implicit Leading Bit. 
+- BFloat16 assumes a normalized format: $1.mantissa$. It does not store the leading 1.
+- MXINT8 is a standard integer: $sx.xx\_xxxx$. It stores all bits explicitly. 
+
+To convert correctly, we used `dont_need_abs` and `bias`.
+
+**step 1**
+First, we extract sign bit and the exponent. We shift them into the correct bit positions for BF16.
+```
+auto sign = static_cast<uint16_t>(hX[i] & 0x80) << 8;
+auto exp = static_cast<uint16_t>(hScales[i / group_size]) << 7;
+```
+**Step 2**: Construct the Mantissa
+Next, we take the lower 6 bits of the absolute integer value and place them into the BF16 mantissa field.
+```
+auto mantissa_abs = abs(hX[i]);
+// Extract lower 6 bits and align, one bit shift left as BF16 has 7     
+// mantissa bit
+auto frac = static_cast<uint16_t>((mantissa_abs & 0x3F) << 1); 
+auto out = cutlass::bfloat16_t::bitcast(sign | exp | frac);
+```
+The problem here is, by placing bits into BF16 directly, the hardware automatically accept this value as $1.xxxxxx0$ (due to the implicit leading 1). We must check if this matches the original integer.
+
+ **step 3** We check the 7th bit (Bit 6) of the original MXINT8 integer to decide if a correction is needed.
+
+1. We verify if the original number had a leading 1  or leading 0.
+```
+auto dont_need_abs = bool(mantissa_abs & 0x40); 
+// Checks the 7th bit
+```
+2. We construct a bias representing exactly $1.0 \times 2^{Exp}$.
+```
+auto bias = cutlass::bfloat16_t::bitcast(sign | exp | uint16_t(0));
+```
+We apply the correction based on the 7th bit check:
+- If 7th bit is 1 `dont_need_abs = True`)
+    - The original MXINT8 integer was in the form 1.xxxxxx. 
+    - BFloat16 interpretation is 1.xxxxxx0.Result: 
+    - They match. No adjustment needed.
+- If 7th bit is 0 `dont_need_abs = False`
+    - The original integer was in the form 0.xxxxxx.
+    -   BFloat16 interpretation is 1.xxxxxx0. 
+    - we ned to correct this by minus 1.0000000(bias) from the wrong BF16 number.
+```
+y[i] = dont_need_abs ? out : out - bias;
+```
+
+
+### 3.c
+#### 3.c.1
+To maximize GPU throughput, it is necessary to evenlly distribute worklda to thread block(CTA), `cta_tiler` tiles the Global thread grid into thread block and `cta_coord` maps the data to each of the thread blocks. This will gaurentee maximum parallelism.
+#### 3.c.2
+In thread block there are multiple threads,`layout_sX` is responsible for tread mapping.
+
+
+### 3.d
+The experiment observed a 66.4% reduction in peak GPU memory usage, which is less than theoretical value of 74.2% calculated by the formula $\frac{32 - (8 + 8/32)}{32}$.
+
+The reason for this difference is because the theoretical formula assumes an ideal case where the entire model is compressed from FP32 to MXINT8, However, the actual implementation is a Weight-Only Quantization, which is showned by following code snipt.
+```
+for layer_name, layer in model.named_modules():
+    if not isinstance(layer, torch.nn.Linear):
+        continue
+    if "classifier" in layer_name:
+        continue
+    layer.cuda()
+    layer_q = QLinearPacked.build_from_linear(layer, group_size=mxint8_group_size)
+    set_layer_by_name(model, layer_name, layer_q)
+    del layer
+    torch.cuda.empty_cache()
+``` 
+1. The implemented quantization (`QLinearPacked`) compresses the static model weights but does not quantize the dynamic activations (intermediate results) generated during inference.
+2. The quantization script select and only quantize t`orch.nn.Linear` layers, leaving other layer in high precision format.
+3. There are system overhead also occupies memory, e.g kernal code, also memory allocation of pytorch may not be ideal, this may result allocate more memory than needed to prevent cases such as fragmentation.

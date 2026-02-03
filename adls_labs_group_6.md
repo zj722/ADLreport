@@ -96,6 +96,20 @@ Figure 1 illustrates the search trajectory of the three different workflows over
 
 
 ## Lab 3
+### Task 1: Mixed-precision search with per-layer IntegerLinear formats
+
+In this task we improved the mixed-precision quantization search from Tutorial 6. The original tutorial applied the same fixed-point width and fractional width to every layer that was converted to IntegerLinear, which is not ideal because different layers in BERT do not have the same sensitivity to quantization. We therefore modified the code so that each torch.nn.Linear layer could independently either remain full precision or be replaced by LinearInteger, and if it was replaced, its integer format could be chosen from width ∈ {8, 16, 32} and fractional width ∈ {2, 4, 8}. These per-layer choices were exposed as additional Optuna hyperparameters and explored using a TPE sampler.
+
+After rerunning the Optuna search, we plotted the running maximum IMDb accuracy as a function of trial number. The curve rises quickly in the first few trials and then plateaus, which indicates that the sampler finds strong mixed-precision configurations early and that further trials produce diminishing returns under the same one-epoch training budget.
+
+![Figure 1: Curves for the three workflows](imgs/mixed_precision_res.png)
+
+The data shows three clear behaviours. First, there is a rapid improvement in the first few trials, where the best accuracy increases from roughly 0.872 to about 0.877 within around six trials. Second, there is a long plateau where the best value stays essentially unchanged across many subsequent trials, suggesting either that the search has already reached the practical ceiling for this setup or that better configurations are rare and would require more exploration or a larger training budget to distinguish. Third, there are occasional catastrophic trials that fall to about 0.5 accuracy, which is near chance on IMDb, showing that certain layer/format combinations can destabilise the model even when most other sampled configurations remain usable. The two low-accuracy outliers (≈0.5) are not visible in the plot because it shows the running best accuracy so far, so trials that do not improve the current best never appear as points on the curve.
+
+A key takeaway from inspecting the best trials is that mixed precision works because some layers tolerate integer formats well while others do not. The top-performing configurations typically quantize “safer” blocks (such as attention output and parts of the feed-forward sublayers) while leaving the most sensitive layers in full precision. This directly supports the motivation for per-layer search: using one global bitwidth is unnecessarily restrictive and can waste precision where it is not needed while harming layers that require higher fidelity.
+
+### Which layers are consistently safe vs sensitive
+Looking across the best-performing trials, the layer-level pattern is very consistent. Layers corresponding to attention output projections and the later feed-forward dense layers are almost always quantized in the top results without harming accuracy, which suggests these blocks are comparatively tolerant to reduced precision. In contrast, attention query/key projection layers and the classifier head are usually kept in full precision in the best trials, and trials that quantize these components are much more likely to lose accuracy or even collapse to chance performance. The practical conclusion is that the model’s decision boundary depends heavily on the fidelity of Q/K projections and the final classifier mapping, whereas other linear layers can often be quantized aggressively with minimal impact, making them the best targets for mixed-precision savings.
 
 ## Lab 4
 ### 1.a

@@ -294,15 +294,51 @@ y[i] = dont_need_abs ? out : out - bias;
 
 
 ### 3.c
+
+To maximize GPU throughput, it is necessary to evenlly distribute workload to GPU threads. 
+Well, in mase-cuda-equantized.cuh, it support multiple group size, following list one case as example where groupt size <=8
+```
+if (group_size <= 8) {
+            auto BLK_M = Int<8>{};
+            auto BLK_K = Int<128>{};
+            auto thd_m = BLK_M;
+            auto thd_k = BLK_K;
+            auto cta_tiler = make_shape(BLK_M, BLK_K);
+            auto layout_sX = make_layout(make_shape(BLK_M, BLK_K));
+            auto layout_sScale = make_layout(make_shape(BLK_K));
+            auto layout_tX = make_layout(make_shape(thd_m, thd_k));
+            dim3 dimBlock(size(layout_tX));
+            dim3 dimGrid(ceil_div(group_size, BLK_M), 
+ceil_div(num_groups, BLK_K));
+            dequantize1d_device<<<dimGrid, dimBlock, 0, stream>>>;
+```
 #### 3.c.1
-To maximize GPU throughput, it is necessary to evenlly distribute worklda to thread block(CTA), `cta_tiler` tiles the Global thread grid into thread block and `cta_coord` maps the data to each of the thread blocks. This will gaurentee maximum parallelism.
+`cta_tiler` is in shape (8, 128). It acts as a window that defines the workload of a single Thread Block 
+
+Back to the quesiton of how `cta_tile` partition the data, it is simply done a 1 to 1 mapping:
+In our code, `BLK_M` represent numbers element in a MXINT8 group: `group_size` and BLK_K reapresent numbers of groups.
+Base on that, cta_tiler is a matrix with 128 groups of MXINT8 tada, where each groupt contains 8 elements stored in a line.
+
+
+#### 3.c.2
+
+`make_layout()` creates the map from coordinates (e.g 2D matrix defined via `make_shape()`) to physical addresses. It automatically calculates strides (e.g., column-major) to linearize the 2D (8, 128) structure into 1D memory.
+
+
+
+The GPU is launched with a Grid that covers the entire input tensor. If the input is large, the Grid will contain many Thread Blocks. Each block processes one cta_tiler sized blocks of data (8x128 elements).
+
+```
+Tensor tXsX = local_partition(sX, layout_sX, threadIdx.x);
+```
+sX here is the tensor in shared memory(L1 cache whithin each grid), where layout_sX provide the data layout.
+
+This function slices the Shared Memory tensor. By using `layout_sX `to partition, we assign each thread to the specific data element that corresponds to its linear thread ID. In our case it is a 1 thread to 1 element mapping. So overall dequantization is done in parallel.
+
 
 
 #### Just a suggestion for addition:
 In this kernel the mantissa vector x is first viewed as a logical 2D tensor mX with shape (group_size, num_groups), where each element is an int8 mantissa and each column (group) shares one uint8 scale from scales. The parameter cta_tiler is a 2D CUTE shape (BLK_M, BLK_K) that defines the tile (submatrix) assigned to a single CUDA block (CTA). The block’s indices (blockIdx.x, blockIdx.y) form the tile coordinate cta_coord, and local_tile(mX, cta_tiler, cta_coord) selects the corresponding global-memory submatrix gX of size (BLK_M, BLK_K). In other words, cta_tiler partitions the full (group_size, num_groups) matrix into a grid of tiles; each block is responsible for copying exactly one tile.
-
-#### 3.c.2
-In thread block there are multiple threads,`layout_sX` is responsible for tread mapping.
 
 #### Just a suggestion for addition:
 After the block’s tile has been staged into shared memory, the work must be divided among the threads in the block. This division is controlled by CUTE layouts. In particular, layout_sX is used with local_partition(sX, layout_sX, threadIdx.x)to produce tXsX, the per-thread fragment of the shared-memory tile. Conceptually, layout_sX defines a mapping from thread IDs to coordinates inside the (BLK_M, BLK_K) tile.

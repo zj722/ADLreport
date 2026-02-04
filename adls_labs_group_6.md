@@ -275,9 +275,16 @@ y[i] = dont_need_abs ? out : out - bias;
 ### 3.c
 #### 3.c.1
 To maximize GPU throughput, it is necessary to evenlly distribute worklda to thread block(CTA), `cta_tiler` tiles the Global thread grid into thread block and `cta_coord` maps the data to each of the thread blocks. This will gaurentee maximum parallelism.
+
+
+#### Just a suggestion for addition:
+In this kernel the mantissa vector x is first viewed as a logical 2D tensor mX with shape (group_size, num_groups), where each element is an int8 mantissa and each column (group) shares one uint8 scale from scales. The parameter cta_tiler is a 2D CUTE shape (BLK_M, BLK_K) that defines the tile (submatrix) assigned to a single CUDA block (CTA). The block’s indices (blockIdx.x, blockIdx.y) form the tile coordinate cta_coord, and local_tile(mX, cta_tiler, cta_coord) selects the corresponding global-memory submatrix gX of size (BLK_M, BLK_K). In other words, cta_tiler partitions the full (group_size, num_groups) matrix into a grid of tiles; each block is responsible for copying exactly one tile.
+
 #### 3.c.2
 In thread block there are multiple threads,`layout_sX` is responsible for tread mapping.
 
+#### Just a suggestion for addition:
+After the block’s tile has been staged into shared memory, the work must be divided among the threads in the block. This division is controlled by CUTE layouts. In particular, layout_sX is used with local_partition(sX, layout_sX, threadIdx.x)to produce tXsX, the per-thread fragment of the shared-memory tile. Conceptually, layout_sX defines a mapping from thread IDs to coordinates inside the (BLK_M, BLK_K) tile.
 
 ### 3.d
 The experiment observed a 66.4% reduction in peak GPU memory usage, which is less than theoretical value of 74.2% calculated by the formula $\frac{32 - (8 + 8/32)}{32}$.

@@ -70,7 +70,11 @@ In Tutorial 5, we implemented the NAS(neural Architecture Search) using optuna w
 #### Task 1
 In task 1, we assessed the accuracy and efficiency accross between TPE and Grid samplers by running NAS for 30 trials and plot the accuracy of best model structure against trials. The result is shwon below:
 
-
+TODO tomorrow:
+- add the analysis for the result of TPESampler and change the plot to the new version
+- add the plot for grid search and explain (no 30 trials for grid search, only 16 trials, out of memory for more trials)
+- compare the result between TPE and Grid search
+- modify explanation for task2 downside
 
 #### Task 2
 The primary objective of this task is to obtain an efficient model that maintains high accuracy after compression (quantization and pruning). However, simply applying a compression pipeline sequentially after a standard NAS often yields suboptimal results. An architecture that performs best in its uncompressed state may be highly sensitive to quantization or pruning, whereas a slightly less accurate architecture might exhibit greater robustness against compression. To address this discrepancy, we evaluated and compared three different workflows:

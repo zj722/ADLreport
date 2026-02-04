@@ -93,18 +93,32 @@ The primary objective of this task is to obtain an efficient model that maintain
 
 **The comparison of result are shown below.**
 
-Figure 1 illustrates the search trajectory of the three different workflows over 30 trials. The specific trends for each curve are analyzed below:
+Figure 2_2 illustrates the search trajectory of the three different workflows over 30 trials. The specific trends for each curve are analyzed below:
 
-![Figure 1: Curves for the three workflows](imgs/nas_comparison_curve.png)
+![Figure 2_2: Curves for the three workflows](imgs/nas_comparison_curve.png)
 
-* **Curve 1: Baseline (Standard NAS without Compression)**
-    Represented by the **blue curve**, this trajectory serves as the performance benchmark (FP32 accuracy). It remains relatively stable and high (~0.86) which is selected dut to the **TPESampler()** is verified to obtain the best result from task1. However, since this workflow ignores compression entirely, this curve represents a "theoretical upper bound" for uncompressed models, serving as a reference point to measure the impact of quantization and pruning in the other tasks.
+#### Curve Analysis
 
-* **Curve 2: Compression-Aware Search (Without Post-Compression Training)**
-    The **orange curve** demonstrates the highest volatility. It starts with a significantly low accuracy (~0.53), revealing that unoptimized architectures have a high inherent sensitivity to compression without being retrained. However, the curve's rapid ascent proves that the search algorithm successfully identified architectures with high native robustness. Despite this improvement, the curve plateaus below the Baseline (Curve 1), confirming that relying solely on architectural robustness is insufficient to fully recover the accuracy lost during compression.
+- **Curve 1: Baseline (Standard NAS without Compression)**  
+  The blue curve represents the best-so-far accuracy of standard NAS without compression. It remains stable at around 0.86 across trials. This result is expected, as the TPE sampler used in Task 1 was shown to reliably find strong-performing architectures. This curve serves as a reference point for evaluating the impact of compression in the other workflows.
 
-* **Curve 3: Compression-Aware Search (With Post-Compression Training)**
-    The **green curve** represents the optimal workflow. It outperforms Curve 2, verifying that retraining is essential for recovering accuracy. Most notably, this curve eventually surpasses the Baseline (Curve 1), achieving the highest final accuracy (~0.87). This may caused by additional training epochs brought by retraining process. Also the combination of compression constraints and additional retraining may acted as a form of regularization, helping the model generalize better on the dataset than the standard FP32 model.
+- **Curve 2: Compression-Aware Search without Retraining**  
+  The orange curve shows large accuracy fluctuations in the early trials and starts from a very low value. This indicates that many architectures suffer significant accuracy loss when compression is applied without retraining. As the search continues, the accuracy improves quickly, showing that the sampler can identify architectures that are naturally more robust to compression. However, the curve plateaus below the baseline, suggesting that architectural robustness alone is not sufficient to fully recover the accuracy lost due to compression.
+
+- **Curve 3: Compression-Aware Search with Retraining**  
+  The green curve achieves the highest final accuracy among the three workflows. It consistently outperforms the no-retraining setting and eventually surpasses the baseline. This improvement may be partly due to the additional training performed after compression. Retraining allows the model to adapt its parameters to quantization and pruning, leading to better final performance.
+
+#### Structural Observations
+
+We further examined the architectures found by each workflow and observed different structural tendencies.
+
+- **Without Retraining:**  
+  When retraining is not used, the search tends to favor deeper architectures with more attention heads. This additional structural redundancy may help reduce the sensitivity to quantization noise.
+
+- **With Retraining:**  
+  When retraining is enabled, the search shifts toward wider architectures with larger hidden and intermediate dimensions. This suggests that higher model capacity helps the compressed model recover accuracy during fine-tuning.
+
+Overall, these results show that compression-aware search is necessary for maintaining accuracy under quantization and pruning. In addition, combining compression-aware search with post-compression training provides the best performance, both in terms of final accuracy and robustness to compression.
 
 
 ## Lab 3

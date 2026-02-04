@@ -45,7 +45,7 @@ The table below summarises the configurations used (total width and fractional w
 | 16 | 12 | **0.83568** | **0.3884** | **0.84212** |
 | 32 | 24 | 0.83564 | 0.3886 | 0.84184 |
 
-Although the configuration `Data in Width: 15`, `Data in Frac Width: 12` achieve the highest results (after PTQ and QAT) and a memory reduction of half, this is a artefact of retraining. In contrast the 1.3 fixed-point model achieves 8 times memory efficiency, and loses merely 2.2% evaluation accuracy. Moreover, this small 4-bit representation gives rise to the possiblity for significant hardware level optimisations.  Therefore, we considered our best model to be the  `Data in Width: 4`, `Data in Frac Width: 3` linear layer quantised model.
+Although the configuration `Data in Width: 16`, `Data in Frac Width: 12` achieve the highest results (after PTQ and QAT) and a memory reduction of half, this is a artefact of retraining. In contrast the 1.3 fixed-point model achieves 8 times memory efficiency, and loses merely 2.2% evaluation accuracy. Moreover, this small 4-bit representation gives rise to the possiblity for significant hardware level optimisations.  Therefore, we considered our best model to be the  `Data in Width: 4`, `Data in Frac Width: 3` linear layer quantised model.
 
 ### What the results show
 

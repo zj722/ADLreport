@@ -68,13 +68,20 @@ The L1/L1 strategy is clearly the most robust as sparsity increases: accuracy st
 In Tutorial 5, we implemented the NAS(neural Architecture Search) using optuna with different search sampler including Grid, Random and TPE-based search. 
 
 #### Task 1
-In task 1, we assessed the accuracy and efficiency accross between TPE and Grid samplers by running NAS for 30 trials and plot the accuracy of best model structure against trials. The result is shwon below:
+In Task 1, we compare the accuracy and search efficiency of the TPE sampler and the Grid sampler by running neural architecture search (NAS) for a fixed number of trials. Figure 2_1 shows the best-so-far accuracy over trials together with the results of individual evaluations. This metric reflects how efficiently each sampler discovers high-performing model architectures under a limited search budget.
 
-TODO tomorrow:
-- add the analysis for the result of TPESampler and change the plot to the new version
-- add the plot for grid search and explain (no 30 trials for grid search, only 16 trials, out of memory for more trials)
-- compare the result between TPE and Grid search
-- modify explanation for task2 downside
+Overall, the TPE sampler has sustained improvement and produces high-accuracy trials, while the Grid sampler plateaus early due to its fixed sampling strategy. Although the Grid sampler finds a decent architecture early on, it fails to improve further. Most of the TPE trial results are concentrated in higher-accuracy regions, whereas Grid sampling is forced to evaluate many low-quality configurations. This confirms that TPE can effectively avoid repeatedly testing poor architectures, while Grid search cannot.
+
+![Figure 2_1: Best-so-far accuracy over trials for the TPE and Grid samplers.](imgs/TPE_Grid.png)
+> *Figure 2_1: Best-so-far accuracy over trials for the TPE and Grid samplers. Solid step lines show the highest accuracy achieved up to each trial, and semi-transparent scatter points show the accuracy of individual trials.*
+
+
+- **TPE Sampler**
+The TPE sampler improves quickly in the early trials and continuously finds better architectures using only a small number of evaluations. It leverages results from previous trials to intelligently select the next configurations. As a result, later trials focus more on promising quantization choices and important layers. Although individual trial results still vary, the overall best-so-far accuracy increases consistently, eventually surpassing the Grid sampler's performance ceiling.
+
+- **Grid Sampler**
+The Grid sampler shows limited performance gains after an initial jump. It evaluates the predefined search space uniformly and ignores information from previous trials. This makes it inefficient in large search spaces where most configurations perform poorly. Furthermore, the Grid sampler faces severe scalability issues. Generating the full search grid in advance caused memory usage to exceed 150 GB even on High-RAM hardware. Because of this limitation, the Grid sampler could only be run for fewer trials (stopped at 15). This demonstrates that grid-based search is unsuitable for large-scale NAS problems due to both low efficiency and prohibitive memory costs.
+
 
 #### Task 2
 The primary objective of this task is to obtain an efficient model that maintains high accuracy after compression (quantization and pruning). However, simply applying a compression pipeline sequentially after a standard NAS often yields suboptimal results. An architecture that performs best in its uncompressed state may be highly sensitive to quantization or pruning, whereas a slightly less accurate architecture might exhibit greater robustness against compression. To address this discrepancy, we evaluated and compared three different workflows:

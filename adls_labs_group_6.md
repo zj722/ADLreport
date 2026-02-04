@@ -68,8 +68,9 @@ The L1/L1 strategy is clearly the most robust as sparsity increases: accuracy st
 In Tutorial 5, we implemented the NAS(neural Architecture Search) using optuna with different search sampler including Grid, Random and TPE-based search. 
 
 #### Task 1
-In task 1, we assessed the accuracy and efficiency accross between TPE and Grid samplers by running NAS for 100 trials and plot the accuracy of best model structure against trials. The result is shwon below:
-![image](./images/TPE_lab2_1.png)
+In task 1, we assessed the accuracy and efficiency accross between TPE and Grid samplers by running NAS for 30 trials and plot the accuracy of best model structure against trials. The result is shwon below:
+
+
 
 #### Task 2
 The primary objective of this task is to obtain an efficient model that maintains high accuracy after compression (quantization and pruning). However, simply applying a compression pipeline sequentially after a standard NAS often yields suboptimal results. An architecture that performs best in its uncompressed state may be highly sensitive to quantization or pruning, whereas a slightly less accurate architecture might exhibit greater robustness against compression. To address this discrepancy, we evaluated and compared three different workflows:

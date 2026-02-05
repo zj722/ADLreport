@@ -66,10 +66,11 @@ The figure below shows accuracy as a function of sparsity for the four combinati
 The L1/L1 strategy is clearly the most robust as sparsity increases: accuracy stays close to the original performance at low-to-moderate sparsity and only degrades gradually up to around 0.7, after which it drops sharply. In contrast, Random/Random fails much earlier and reaches near-chance performance by roughly 0.6–0.7 sparsity, which suggests that randomly removing parameters destroys important structure that fine-tuning cannot reliably recover. Looking at the mixed strategies also shows that the weight-pruning choice dominates: when weights are pruned with L1 the model remains stable for longer, while randomly pruning weights causes a much earlier collapse even if activation pruning is L1-based. Finally, there is a clear “cliff zone” beyond about 0.7–0.8 sparsity where most strategies converge toward ~50% accuracy, indicating that at extreme pruning the remaining capacity is no longer sufficient for the task.
 
 ## Lab 2
+
 ### Overview 
 In Tutorial 5, we implemented the NAS(neural Architecture Search) using optuna with different search sampler including Grid, Random and TPE-based search. 
 
-#### Task 1
+#### Task 1: Best-so-far Accuracy Comparison between TPE and Grid Samplers
 In Task 1, we compare the accuracy and search efficiency of the TPE sampler and the Grid sampler by running neural architecture search (NAS) for a fixed number of trials. Figure 2_1 shows the best-so-far accuracy over trials together with the results of individual evaluations. This metric reflects how efficiently each sampler discovers high-performing model architectures under a limited search budget.
 
 Overall, the TPE sampler has sustained improvement and produces high-accuracy trials, while the Grid sampler plateaus early due to its fixed sampling strategy. Although the Grid sampler finds a decent architecture early on, it fails to improve further. Most of the TPE trial results are concentrated in higher-accuracy regions, whereas Grid sampling is forced to evaluate many low-quality configurations. This confirms that TPE can effectively avoid repeatedly testing poor architectures, while Grid search cannot.
@@ -85,13 +86,14 @@ The TPE sampler improves quickly in the early trials and continuously finds bett
 The Grid sampler shows limited performance gains after an initial jump. It evaluates the predefined search space uniformly and ignores information from previous trials. This makes it inefficient in large search spaces where most configurations perform poorly. Furthermore, the Grid sampler faces severe scalability issues. Generating the full search grid in advance caused memory usage to exceed 150 GB even on High-RAM hardware. Because of this limitation, the Grid sampler could only be run for fewer trials (stopped at 15). This demonstrates that grid-based search is unsuitable for large-scale NAS problems due to both low efficiency and prohibitive memory costs.
 
 
-#### Task 2
+#### Task 2: Compression-Aware Search for Quantization and Pruning
 The primary objective of this task is to obtain an efficient model that maintains high accuracy after compression (quantization and pruning). However, simply applying a compression pipeline sequentially after a standard NAS often yields suboptimal results. An architecture that performs best in its uncompressed state may be highly sensitive to quantization or pruning, whereas a slightly less accurate architecture might exhibit greater robustness against compression. To address this discrepancy, we evaluated and compared three different workflows:
+
 1. **Standard NAS + Post Compression Pipeline**： In this baseline approach, the compression pipeline is applied only after the optimal architecture has been found by a standard NAS (from Task 1). Since the search phase does not account for compression, there is no guarantee that the selected architecture will retain its performance after quantization and pruning.     
+
 2. **Compression-Aware Search (Without Post Compression Training)**: In this workflow, the compression steps are integrated directly into the search loop. For each trial, the model is constructed, trained, and immediately compressed before evaluation. This method aims to find architectures that are natively robust, meaning they maintain high accuracy immediately after compression without requiring further adaptation.
 
 3. **Compression-Aware Search with Post-Compression Training**: Similar to the second approach, compression is applied within each trial. However, crucially, we perform additional training on the compressed model before final evaluation. This step aiming to recover accuracy lost during compression. This method seeks the global optimum by finding architectures that are not just robust, but also have high "recoverability" through fine-tuning.
-
 
 **The comparison of result are shown below.**
 

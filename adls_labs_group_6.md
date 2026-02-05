@@ -148,9 +148,9 @@ The following plot shows Mixed Precision Search for 30 trials.
 ### Evaluation
 The results above, reinforce the `TPESampler` hypothesis made earlier. The plot shows that the highest concurrent accuracy saturates at around trial number 10. Neglibile performance increase can be observed in the next 20 trials, showing that the chosen sampler successfully optimises the search frontier, promoting the use of early stopping. 
 
-The highest accuracy achieved from the search is 87.572%. This corresponds to the following quantisation architecture reported at the last trial:
+The highest accuracy achieved from the search is 87.572%. This corresponds to the following quantisation architecture and results reported at the last trial:
 
-| Layer | Module | Component | Quantization Type | Configuration |
+| Encoder Layer | Module | Component | Quantization Type | Configuration |
 | :--- | :--- | :--- | :--- | :--- |
 | **0** | Attention | Self Query | Minifloat Denorm | width: 16, exp: 4 |
 | **0** | Attention | Self Key | Block FP | width: 8, bs: 8, exp: 4 |
@@ -161,14 +161,15 @@ The highest accuracy achieved from the search is 87.572%. This corresponds to th
 | **1** | Attention | Output Dense | Log | width: 32, exp: 4 |
 | **1** | Intermediate | Dense | Integer | width: 32, frac: 2 |
 | **1** | Output | Dense | Binary | bipolar: True, width: 16, frac: 2 |
-| **Last** | Classifier | Head | Log | width: 8, exp: 4 |
+| **-** | Classifier | Head | Log | width: 8, exp: 4 |
 
-The following plot shows that Mixed-Precision
+By counting the number of bits of affected layers for each model, we can calculate a relative memory efficiency improvement and plot the results.
 
-![Figure 3: Memory Foot Print Comparison Basline vs. Mixed-Precision](imgs/Task2_1%20eval.png)
+![Figure 3: Memory Foot Print and Accuracy Comparison Baseline vs. Mixed-Precision](imgs/Lab3_Task_2_Plot2.png)
 
-- [x] Line Plot Per-Layer to be obtained
-- [x] Anaylsis and Evaluation
+Memory efficiency does not scale with bit count as each module has different number of weights, so achieving low bit count on a layer with low number of weights is not very impactful. However, from a efficiency standpoint, the results above illustrate that full mixed precision quantisation achieves a signficant 51.9% unified memory reduction in the linear layers, significantly more efficient than both the baseline and single type mixed precision model. One noticeable difference between the full mixed precision search conducted in Task 2 and the `LinearInteger` type mixed precision search conducted in Task 1 is that the single type search decided not to quantise the final classifier, whilst the full precision search quantised this module into `LinearLog` precision, saving 24 bits per weight. 
+This proves Mase, combined with Optuna, achieves significant software-level efficient gains whilst also retaining edge performance, and removing the cumbersome process of manual and non-optimal search algorithms.
+
 
 The following plots show an ablation study of Static Precision Search for a maximum of 30 trials.
 - [ ] Line Plot of each precision

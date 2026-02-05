@@ -143,8 +143,32 @@ Looking across the best-performing trials, the layer-level pattern is very consi
 This task automates the manual and cumbersome approach for searching for the best mixed precision hyperparameters. A search space defines searchable hyperparameters, such as precision type: `Binary` and bit width: `weight_widths`. A constructor defines the control flow for choosing a set of hyperparameters per layer or globally, and then instantiating a copy of the original model with each target layer replaced with the quantised versions. The following work investigates mixed precision search for default `torch.nn.Linear` layers. Due to the training budget, all studies were conducted for 30 trials, which may be insufficient to complete all possible hyperparameter configurations when conducting mixed precision per layer-wise. However, this is mitigated by the use of the Tree-structured Parzen Estimator algorithm (`TPESampler`) for hyperparameter searching. This algorithm selects the next best hyperparameter values by learning from past trial results. As a result, you can achieve approximate results to an exhaustive `GridSampler` with fewer trials. Note that all studies were computed with random seeds; results may not be exactly reproducible.
 
 The following plot shows Mixed Precision Search for 30 trials. 
-- [ ] Line Plot Per-Layer to be obtained
-- [ ] Anaylsis and Evaluation
+![Figure 2: Curve for Mixed-Precision Search for 30 trials](imgs/Lab3Task2_1.png)
+
+### Evaluation
+The results above, reinforce the `TPESampler` hypothesis made earlier. The plot shows that the highest concurrent accuracy saturates at around trial number 10. Neglibile performance increase can be observed in the next 20 trials, showing that the chosen sampler successfully optimises the search frontier, promoting the use of early stopping. 
+
+The highest accuracy achieved from the search is 87.572%. This corresponds to the following quantisation architecture reported at the last trial:
+
+| Layer | Module | Component | Quantization Type | Configuration |
+| :--- | :--- | :--- | :--- | :--- |
+| **0** | Attention | Self Query | Minifloat Denorm | width: 16, exp: 4 |
+| **0** | Attention | Self Key | Block FP | width: 8, bs: 8, exp: 4 |
+| **0** | Attention | Output Dense | Minifloat IEEE | width: 32, exp: 4 |
+| **0** | Intermediate | Dense | Binary Scaling | bipolar: True |
+| **0** | Output | Dense | Integer | width: 16, frac: 2 |
+| **1** | Attention | Self Key | Block Log | width: 8, bs: 32, exp: 8 |
+| **1** | Attention | Output Dense | Log | width: 32, exp: 4 |
+| **1** | Intermediate | Dense | Integer | width: 32, frac: 2 |
+| **1** | Output | Dense | Binary | bipolar: True, width: 16, frac: 2 |
+| **Last** | Classifier | Head | Log | width: 8, exp: 4 |
+
+The following plot shows that Mixed-Precision
+
+![Figure 3: Memory Foot Print Comparison Basline vs. Mixed-Precision](imgs/Task2_1%20eval.png)
+
+- [x] Line Plot Per-Layer to be obtained
+- [x] Anaylsis and Evaluation
 
 The following plots show an ablation study of Static Precision Search for a maximum of 30 trials.
 - [ ] Line Plot of each precision

@@ -179,7 +179,7 @@ The following plots show an ablation study of Static Precision Search for a maxi
 
 
 ## Lab 4
-### 1.a
+### 1.a: Lack of Runtime Speedup with torch.compile
 #### Analysis
 The observation that the first run yields no speedup (or is even slower) is an expected behavior due to the Just-In-Time compilation overhead inherent to `torch.compile()`. The optimization process executes only when the model is first called with data. This process involves three distinct stages:
 1. TorchDynamo: Upon the first execution, TorchDynamo analyzes the code to separate PyTorch operations from standard Python code and constructs an FX Graph. This graph capture process is generally efficient and does not significantly contribute to the latency.
@@ -198,7 +198,7 @@ Following table illustrate the result comparing first run and subsequent run of 
 | Raw model (CPU)| 3.7306s | 3.5491s |
 | Optimized model (CPU) | 3.8752s |  2.1237s|
 
-### 1.b
+### 1.b: Effect of Using CUDA
 When changing device to NVIDIA RTX A6000。
 |Models | First Run | Subsequent Run |
 | :--- | :----: | ---: |
@@ -210,7 +210,7 @@ Still, the significant latency observed in the first run is due to the compilati
 
 For the subsequent acceleration, the speedup on GPU is limited. For analysis, i would say PyTorch's already leverages highly optimized libraries (e.g., cuBLAS, cuDNN) for compute-bound operations. Therefore, the potential for further optimization via Kernal fusion is limited.
 
-### 2.a
+### 2.a: Fused SDPA vs. Naive Implementation
 ```
 import torch.utils.benchmark as benchmark
 
@@ -266,7 +266,7 @@ Result are shown in below.
 | Naive kernal| 301.6185ms | |
 | Fused kernal | 53.6211 ms | 5.62x|
 
-### 2.b
+### 2.b: Effect of Using CUDA
 By switch device to cuda, result shows an huge background speedup ~3000x speedup for naive kernal imlementation. 
 
 Still, fused kernal is better than naive implementation, whith 3.19x speedup
@@ -275,12 +275,12 @@ Still, fused kernal is better than naive implementation, whith 3.19x speedup
 | Naive kernal|0.1075 ms | |
 | Fused kernal | 0.0337 ms| 3.19x|
 
-### 3.a
+### 3.a: Benefits of MXINT8 for Custom Hardware
 If quantized weight and activation from FP to MXINT8, the computing power would increase, MXINT8 is bascally in form of 8-bit integer (effective bitwidth change little bit with block_size) so hardware designers can fit more of them onto the same size chip.
 Also, MXINT8 saves compute from sharing exponent, but the expressive power for each number is still 16bit(1 bit sign, 8bit exp and 8bit of mantissa). so this keeps accuracy which is important for model.
 
 
-### 3.b
+### 3.b: Role of dont_need_abs and bias
 
 
 Dequantization Logic: MXINT8 to BF16This section demonstrates the step-by-step logic for dequantizing MXINT8  into BFloat16 format.
@@ -334,7 +334,7 @@ y[i] = dont_need_abs ? out : out - bias;
 ```
 
 
-### 3.c
+### 3.c: cta_tiler and layout_sX Thread/Data Partitioning
 
 To maximize GPU throughput, it is necessary to evenlly distribute workload to GPU threads. 
 Well, in mase-cuda-equantized.cuh, it support multiple group size, following list one case as example where groupt size <=8
@@ -384,7 +384,7 @@ In this kernel the mantissa vector x is first viewed as a logical 2D tensor m
 #### Just a suggestion for addition:
 After the block’s tile has been staged into shared memory, the work must be divided among the threads in the block. This division is controlled by CUTE layouts. In particular, layout_sX is used with local_partition(sX, layout_sX, threadIdx.x)to produce tXsX, the per-thread fragment of the shared-memory tile. Conceptually, layout_sX defines a mapping from thread IDs to coordinates inside the (BLK_M, BLK_K) tile.
 
-### 3.d
+### 3.d: Why Memory Saving Is Not Exactly 86.7%
 The experiment observed a 66.4% reduction in peak GPU memory usage, which is less than theoretical value of 74.2% calculated by the formula $\frac{32 - (8 + 8/32)}{32}$.
 
 The reason for this difference is because the theoretical formula assumes an ideal case where the entire model is compressed from FP32 to MXINT8, However, the actual implementation is a Weight-Only Quantization, which is showned by following code snipt.

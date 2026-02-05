@@ -192,7 +192,7 @@ The observation that the first run yields no speedup (or is even slower) is an e
 
  - On GPU: It generates Triton kernels and compiles NVCC
 #### Result
-Following table illustrate the result comparing first run and subsequent run of torch.compile() on CPU
+Following table illustrate the result comparing first run and subsequent run of `torch.compile()` on CPU
 |Models | First Run | Subsequent Run |
 | :--- | :----: | ---: |
 | Raw model (CPU)| 3.7306s | 3.5491s |
@@ -215,14 +215,8 @@ For the subsequent acceleration, the speedup on GPU is limited. For analysis, i 
 import torch.utils.benchmark as benchmark
 
 device = "cpu"
-
-#....
-
 model_unfused = ScaledDotProductAttention()
-model_fused = ScaledDotProductAttentionFused()
 num_threads = 1 
-
-print(f"\n start (Threads={num_threads})...")
 
 t0 = benchmark.Timer(
     stmt='fn(q, k, v)',
@@ -233,41 +227,18 @@ t0 = benchmark.Timer(
     description='shape=(32,8,128,64), fp16'
 )
 
-t1 = benchmark.Timer(
-    stmt='fn(q, k, v)',
-    globals={'fn': model_fused, 'q': query, 'k': key, 'v': value},
-    num_threads=num_threads,
-    label='Attention Comparison',
-    sub_label='Fused (Optimized)',
-    description='shape=(32,8,128,64), fp16'
-)
-
 res_unfused = t0.blocked_autorange(min_run_time=1.0)
-res_fused = t1.blocked_autorange(min_run_time=1.0)
 print(res_unfused)
-print(res_fused)
-
-# compare speedup
-time_unfused = res_unfused.median
-time_fused = res_fused.median
-speedup = time_unfused / time_fused
-
-print("-" * 40)
-print(f"Result Summary:")
-print(f"Unfused Time: {time_unfused * 1000:.4f} ms")
-print(f"Fused Time:   {time_fused * 1000:.4f} ms")
-print(f"🚀 Speedup:   {speedup:.2f}x")
-print("-" * 40)
 ```
-Above code compares the fused_kernal with naive kernal on speed using  `torch_benchmark_timer`.
-Result are shown in below.
+Above code measure the kernal on speed using  `torch_benchmark_timer`.
+Comparison result are shown in table below.
 |kernal | time | speedup|
 | :--- | :----: | ---: |
 | Naive kernal| 301.6185ms | |
 | Fused kernal | 53.6211 ms | 5.62x|
 
 ### 2.b: Effect of Using CUDA
-By switch device to cuda, result shows an huge background speedup ~3000x speedup for naive kernal imlementation. 
+By switch device to GPU, result shows an huge background speedup ~3000x for naive kernal imlementation. 
 
 Still, fused kernal is better than naive implementation, whith 3.19x speedup
 |kernal | time | speedup|
@@ -276,8 +247,11 @@ Still, fused kernal is better than naive implementation, whith 3.19x speedup
 | Fused kernal | 0.0337 ms| 3.19x|
 
 ### 3.a: Benefits of MXINT8 for Custom Hardware
-If quantized weight and activation from FP to MXINT8, the computing power would increase, MXINT8 is bascally in form of 8-bit integer (effective bitwidth change little bit with block_size) so hardware designers can fit more of them onto the same size chip.
-Also, MXINT8 saves compute from sharing exponent, but the expressive power for each number is still 16bit(1 bit sign, 8bit exp and 8bit of mantissa). so this keeps accuracy which is important for model.
+If quantized weight and activation from FP to MXINT8, the computing power would increase, solve the inference bottleneck -- memory bandwidth.
+
+MXINT8 is bascally in form of 8-bit integer for mantissa with shared exponent block-wise (effective bitwidth change little bit with block_size), so this reduce the bitwidth for number, so more weights could be transfered during model computation.
+
+Also, MXINT8 keeps the expressive power for each number where representation range is still 16 bit(8bit exp and 8bit of mantissa). so this keeps accuracy which is important for model.
 
 
 ### 3.b: Role of dont_need_abs and bias
@@ -337,7 +311,7 @@ y[i] = dont_need_abs ? out : out - bias;
 ### 3.c: cta_tiler and layout_sX Thread/Data Partitioning
 
 To maximize GPU throughput, it is necessary to evenlly distribute workload to GPU threads. 
-Well, in mase-cuda-equantized.cuh, it support multiple group size, following list one case as example where groupt size <=8
+Well, in `mase_cuda/dequantized.cuh`, it takes consider of workload distrubution, it support multiple group size configuration, following list one case as example where groupt size <=8.
 ```
 if (group_size <= 8) {
             auto BLK_M = Int<8>{};
@@ -376,14 +350,6 @@ sX here is the tensor in shared memory(L1 cache whithin each grid), where layout
 
 This function slices the Shared Memory tensor. By using `layout_sX `to partition, we assign each thread to the specific data element that corresponds to its linear thread ID. In our case it is a 1 thread to 1 element mapping. So overall dequantization is done in parallel.
 
-
-
-#### Just a suggestion for addition:
-In this kernel the mantissa vector x is first viewed as a logical 2D tensor mX with shape (group_size, num_groups), where each element is an int8 mantissa and each column (group) shares one uint8 scale from scales. The parameter cta_tiler is a 2D CUTE shape (BLK_M, BLK_K) that defines the tile (submatrix) assigned to a single CUDA block (CTA). The block’s indices (blockIdx.x, blockIdx.y) form the tile coordinate cta_coord, and local_tile(mX, cta_tiler, cta_coord) selects the corresponding global-memory submatrix gX of size (BLK_M, BLK_K). In other words, cta_tiler partitions the full (group_size, num_groups) matrix into a grid of tiles; each block is responsible for copying exactly one tile.
-
-#### Just a suggestion for addition:
-After the block’s tile has been staged into shared memory, the work must be divided among the threads in the block. This division is controlled by CUTE layouts. In particular, layout_sX is used with local_partition(sX, layout_sX, threadIdx.x)to produce tXsX, the per-thread fragment of the shared-memory tile. Conceptually, layout_sX defines a mapping from thread IDs to coordinates inside the (BLK_M, BLK_K) tile.
-
 ### 3.d: Why Memory Saving Is Not Exactly 86.7%
 The experiment observed a 66.4% reduction in peak GPU memory usage, which is less than theoretical value of 74.2% calculated by the formula $\frac{32 - (8 + 8/32)}{32}$.
 
@@ -401,5 +367,6 @@ for layer_name, layer in model.named_modules():
     torch.cuda.empty_cache()
 ``` 
 1. The implemented quantization (`QLinearPacked`) compresses the static model weights but does not quantize the dynamic activations (intermediate results) generated during inference.
-2. The quantization script select and only quantize t`orch.nn.Linear` layers, leaving other layer in high precision format.
-3. There are system overhead also occupies memory, e.g kernal code, also memory allocation of pytorch may not be ideal, this may result allocate more memory than needed to prevent cases such as fragmentation.
+2. The quantization script select and only quantize `torch.nn.Linear` layers, leaving other layer in high precision format.
+3. There are system overhead also occupies memory, e.g kernal code.
+4. Memory allocation of pytorch may not be ideal, this may result allocate more memory than needed to prevent cases such as fragmentation.

@@ -5,27 +5,28 @@
 ### What we should do and what we did
 In this lab we learned the basic MASE workflow. We did this by tracing a BERT-tiny classifier into a MaseGraph, running metadata analysis passes to build the MASE IR view, writing an analysis pass to count dropout modules and a transform pass to remove them, and finally training/evaluating BERT on IMDb using both supervised fine-tuning and LoRA. We also exported checkpoints so the results can be used in future labs.
 
-### Task: remove attention_mask and labels and explain the graph changes
-The graph topology changes when attention_mask and labels are removed from hf_input_names. This happens because Torch FX tracing records only the execution path taken during tracing, not every possible branch in the Python forward().
+### Task: Removal of `attention_mask` and `labels`
+The graph topology changes when attention_mask and labels are removed from hf_input_names. This happens because Torch FX tracing records only the execution path taken during tracing, not every possible branch in the Python forward(). A visualisation of one change can be seen below:
+
+![Lab 0 Example](imgs/Lab%200%20Example.png)
 
 When labels is included as an FX placeholder, HuggingFace’s forward() typically takes the “labels are not None” path and traces the loss computation branch, so the graph contains an extra loss subgraph and the output includes loss (and logits). When labels is removed, labels becomes literally None during tracing, the loss branch is not executed, and that entire subgraph disappears, changing the output structure.
 
 When attention_mask is included, the graph contains the mask-processing path feeding into the attention blocks. When it is removed, attention_mask becomes None during tracing and the model either creates a default mask internally (rewiring the mask path to depend on input_ids) or skips parts of masking logic entirely. In both cases the dependency structure changes, so the traced compute graph is genuinely different.
 
 ## Lab 1
-### Task 1: Accuracy vs Fixed-point Width (PTQ vs QAT)
+### Task 1: Evaluating the Effect of Different Fixed-point Width Quantization Schemes
 
-In this task we repeated the quantization workflow from Tutorial 3, where every Linear layer is quantized using a fixed-point configuration, but instead of using a single precision we swept the fixed-point width from 4 to 32 bits**. For each width we followed the same procedure as in the tutorial: we first evaluated post-training quantization (PTQ)** directly, and then ran quantization-aware training (QAT)** to fine-tune the quantized model and re-evaluated it on IMDb. The goal was to see how precision affects accuracy and to isolate the benefit of post-quantization fine-tuning.
+This task repeats the quantisation workflow from Tutorial 3, where linear layers are quantised to fixed-point integer precision. However, instead of using a single precision (2.2), the fixed-point data width was varied from 4 to 32 bits, and the fractional width was varied from 25% to 75%. At every configuration, the model was evaluated directly after post-training quantization (PTQ)** and results were recorded. Quantization-aware training (QAT)** was used to fine-tune the resulting model from PTQ, and the model was re-evaluated on the IMDb dataset. The objective was to investigate how accuracy is affected by precision, and to observe the effectiveness of post-quantization fine-tuning.
 
-### Plot: Best Accuracy Achieved at each Precision (PTQ vs QAT)
-
-The figure below shows the highest evaluation accuracy obtained for each fixed-point width, with separate curves for PTQ and QAT as requested.
+### Plot: Evaluation Accuracy of Various Quantization Schemes of Different Fixed-Point Widths Before and After PTQ and QAT (Fractional Width at 50%)
+The massive dip in the PTQ curve shows how aggressive global quantisation negatively impacts the evaluation accuracy of the model, especially when quantised to a bit width of 4. Additionally, the QAT curve demonstrates that post-quantisation fine-tuning (QAT) is very effective at recovering baseline accuracy. At a bit width of 8, the model evaluates to the same accuracy, requiring 4 times less memory for the linear layers, and improves inference time due to INT8 calculations being much faster than FP32.
 
 ![IMDb accuracy vs fixed-point width](imgs/IMDb_accuracy_vs_fixed-point_width.png)
 
-### Table: quantization configurations and results
+### Table: LinearInteger Quantization Search for PTQ and QAT
 
-The table below summarises the configurations used (total width and fractional width) and the corresponding PTQ/QAT outcomes.
+The table below summarises the configurations used (total width and fractional width) and the corresponding PTQ/QAT outcomes for various fixed-point widths and fractional widths.
 
 | Data in Width | Data in Frac Width | PTQ: Evaluation Accuracy | QAT: Training Loss | QAT: Evaluation Accuracy |
 | --- | --- | --- | --- | --- |
@@ -45,25 +46,25 @@ The table below summarises the configurations used (total width and fractional w
 | 16 | 12 | **0.83568** | **0.3884** | **0.84212** |
 | 32 | 24 | 0.83564 | 0.3886 | 0.84184 |
 
-Although the configuration `Data in Width: 16`, `Data in Frac Width: 12` achieve the highest results (after PTQ and QAT) and a memory reduction of half, this is a artefact of retraining. In contrast the 1.3 fixed-point model achieves 8 times memory efficiency, and loses merely 2.2% evaluation accuracy. Moreover, this small 4-bit representation gives rise to the possiblity for significant hardware level optimisations.  Therefore, we considered our best model to be the  `Data in Width: 4`, `Data in Frac Width: 3` linear layer quantised model.
+Although the configuration `Data in Width: 16`, `Data in Frac Width: 12` achieve the highest results (after PTQ and QAT) and a memory reduction of half, this is a artefact of additional fine-tuning. In contrast, the 1.3 fixed-point model achieves 8 times memory efficiency, and loses merely 2.2% evaluation accuracy. Moreover, this small 4-bit representation gives rise to the possiblity for significant hardware level optimisations. Therefore, the `Data in Width: 4`, `Data in Frac Width: 3` linear layer quantised model is crowned as our best configuration to be used in Task 2.
 
 ### What the results show
 
 Overall, accuracy improves sharply when moving from 4-bit to 8-bit**, and then largely saturates from 8-bit up to 32-bit. The PTQ results show that 4-bit is the main bottleneck**: direct PTQ at 4-bit performs poorly (0.5777), which indicates that quantization noise is too severe without adaptation. QAT, however, recovers a large amount of performance at 4-bit (0.8136), showing that post-quantization fine-tuning is essential at very low precision. At 8-bit, PTQ already approaches the floating-point baseline (0.8228 vs 0.8356), and QAT provides a smaller improvement (0.8394). Beyond 8–16 bits, the gains become marginal: PTQ is essentially at baseline, and QAT peaks around 16-bit (0.8421) with 32-bit being almost identical (0.8418). This confirms that QAT matters most when quantization error is large, and becomes less impactful once the precision is high enough that the quantized model is already close to the baseline.
 
-### Task 2: Accuracy vs Sparsity (Pruning Strategies)
+### Task 2: Accuracy vs Sparsity vs Pruning Method
 
-In this task we took the best quantized model from Task 1 and applied the pruning workflow from Tutorial 4, but this time we swept the sparsity from 0.1 to 0.9. For each sparsity level we pruned the model and measured the best IMDb evaluation accuracy achieved, then compared different pruning strategies by plotting separate curves for Random and L1-norm (magnitude-based) methods.
+The best fix-point integer quantized model (`Data in Width: 4`, `Data in Frac Width: 3`) from Task 1 was taken, and applied the pruning workflow from Tutorial 4. Sparsity was varied from 0.1 to 0.9 and all possible pruning combinations for weights and biases were investigated. The model was evaluated after each prune and the IMDb evaluation accuracy was recorded.
 
-### Plot: Best Accuracy Cchieved at each Sparsity (different pruning strategies)
+### Plot: Mixed-Method Pruning: Evaluation Accuracy against Sparsity for Different Pruning Method Configurations
 
-The figure below shows accuracy as a function of sparsity for the four combinations of weight-pruning and activation-pruning strategies, where the main comparison is between Random and L1-norm pruning.
+The figure below shows accuracy as a function of sparsity for the four combinations of weight and activation pruning strategies, where the main comparison is between Random and L1-norm pruning.
 
 ![IMDb Accuracy vs. Sparsity across Pruning Strategies](imgs/pruning.png)
 
 ### What the results show
 
-The L1/L1 strategy is clearly the most robust as sparsity increases: accuracy stays close to the original performance at low-to-moderate sparsity and only degrades gradually up to around 0.7, after which it drops sharply. In contrast, Random/Random fails much earlier and reaches near-chance performance by roughly 0.6–0.7 sparsity, which suggests that randomly removing parameters destroys important structure that fine-tuning cannot reliably recover. Looking at the mixed strategies also shows that the weight-pruning choice dominates: when weights are pruned with L1 the model remains stable for longer, while randomly pruning weights causes a much earlier collapse even if activation pruning is L1-based. Finally, there is a clear “cliff zone” beyond about 0.7–0.8 sparsity where most strategies converge toward ~50% accuracy, indicating that at extreme pruning the remaining capacity is no longer sufficient for the task.
+The L1/L1 strategy is clearly the most robust as sparsity increases: accuracy stays close to the original performance at low-to-moderate sparsity and only degrades gradually up to around 0.7, after which it drops sharply. In contrast, Random/Random fails much earlier and reaches near-chance performance by roughly 0.6–0.7 sparsity, which suggests that randomly removing parameters destroys important structure that fine-tuning cannot reliably recover. Analysis of mixed-method pruning shows that method of activation pruning has a significantly greater impact on model performance than the method of weight pruning. This is evidenced by a sharp performance drop whenever the activation method switches to random, regardless of the weight pruning technique employed. Visually, this is represented by the distinct gap between the top two trajectories (L1 activation pruning) and the bottom two (random activation pruning). Finally, there is a clear “cliff zone” beyond about 0.7–0.8 sparsity where all models begin returning random guessing, indicating that under extreme pruning, the model significantly loses the capability to learning.
 
 ## Lab 2
 
@@ -128,9 +129,9 @@ Overall, these results show that compression-aware search is necessary for maint
 ## Lab 3
 ### Task 1: Mixed-precision Search with Per-Layer IntegerLinear Formats
 
-In this task we improved the mixed-precision quantization search from Tutorial 6. The original tutorial applied the same fixed-point width and fractional width to every layer that was converted to IntegerLinear, which is not ideal because different layers in BERT do not have the same sensitivity to quantization. We therefore modified the code so that each torch.nn.Linear layer could independently either remain full precision or be replaced by LinearInteger, and if it was replaced, its integer format could be chosen from width ∈ {8, 16, 32} and fractional width ∈ {2, 4, 8}. These per-layer choices were exposed as additional Optuna hyperparameters and explored using a TPE sampler.
+In this task, we improved the mixed-precision quantization search from Tutorial 6. The original tutorial applied mixed-precision search covering only type `torch.nn.Linear` and `LinearInteger` at static widths. The original search space and constructor are not ideal because different layers in BERT may not have the same sensitivity to quantization, and can benefit from mixed-precision. Therefore, the search space and constructor were modified so that Optuna also decides the quantization data width and fractional width. Each layer could independently decide to remain full precision or be quantised to `LinearInteger`, and if it were to be replaced, its integer format could be chosen from total width ∈ {8, 16, 32} and fractional width ∈ {2, 4, 8}. The modified search space and constructor were implemented into an objective function that returned the evaluation accuracy of the constructed model at a given trial. The returned evaluation accuracy is used by the Optuna study and Tree-structured Parzen Estimator algorithm (`TPESampler`) to algorithmically maximise the next objective return.  Due to the training budget, all studies were conducted for 30 trials, which may be insufficient to complete all possible hyperparameter configurations when conducting mixed precision per layer-wise. However, this is mitigated by the use of the `TPESampler` for hyperparameter searching. This algorithm selects the next best hyperparameter values by learning from past trial results. As a result, approximate results to an exhaustive full `GridSampler` search can be achieved in fewer trials. Note that all studies were computed with random seeds; results may not be exactly reproducible.
 
-After rerunning the Optuna search, we plotted the running maximum IMDb accuracy as a function of trial number. The curve rises quickly in the first few trials and then plateaus, which indicates that the sampler finds strong mixed-precision configurations early and that further trials produce diminishing returns under the same one-epoch training budget.
+Evaluation accuracy was recorded after each Optuna search, and the maximum achieved evaluation accuracy was plotted against the trial count. The curve rises quickly in the first few trials and then plateaus, which indicates that the sampler finds strong mixed-precision configurations early, and that further trials produce diminishing returns under the same one-epoch training budget. This affirms the use of `TPESampler`, but does not eliminate the possibility of a node with better mixed-precision configuration, expandable with an exhaustive search.
 
 ![Figure 1: Curves for the three workflows](imgs/mixed_precision_res.png)
 
@@ -138,13 +139,13 @@ The data shows three clear behaviours. First, there is a rapid improvement in th
 
 A key takeaway from inspecting the best trials is that mixed precision works because some layers tolerate integer formats well while others do not. The top-performing configurations typically quantize “safer” blocks (such as attention output and parts of the feed-forward sublayers) while leaving the most sensitive layers in full precision. This directly supports the motivation for per-layer search: using one global bitwidth is unnecessarily restrictive and can waste precision where it is not needed while harming layers that require higher fidelity.
 
-### Which layers are consistently safe vs sensitive
+### Which Layers are Consistently Safe vs Sensitive
 Looking across the best-performing trials, the layer-level pattern is very consistent. Layers corresponding to attention output projections and the later feed-forward dense layers are almost always quantized in the top results without harming accuracy, which suggests these blocks are comparatively tolerant to reduced precision. In contrast, attention query/key projection layers and the classifier head are usually kept in full precision in the best trials, and trials that quantize these components are much more likely to lose accuracy or even collapse to chance performance. The practical conclusion is that the model’s decision boundary depends heavily on the fidelity of Q/K projections and the final classifier mapping, whereas other linear layers can often be quantized aggressively with minimal impact, making them the best targets for mixed-precision savings.
 
-### Task 2: Per-Layer (Mixed) and Global Quantisation (Static) Precision Search
-This task automates the manual and cumbersome approach for searching for the best mixed precision hyperparameters. A search space defines searchable hyperparameters, such as precision type: `Binary` and bit width: `weight_widths`. A constructor defines the control flow for choosing a set of hyperparameters per layer or globally, and then instantiating a copy of the original model with each target layer replaced with the quantised versions. The following work investigates mixed precision search for default `torch.nn.Linear` layers. Due to the training budget, all studies were conducted for 30 trials, which may be insufficient to complete all possible hyperparameter configurations when conducting mixed precision per layer-wise. However, this is mitigated by the use of the Tree-structured Parzen Estimator algorithm (`TPESampler`) for hyperparameter searching. This algorithm selects the next best hyperparameter values by learning from past trial results. As a result, you can achieve approximate results to an exhaustive `GridSampler` with fewer trials. Note that all studies were computed with random seeds; results may not be exactly reproducible.
+### Task 2: Per-Layer (Mixed) and Global Quantization (Static) Precision Search
+This task optimizes the manual and cumbersome approach for searching for the best mixed precision hyperparameters across all supported precisions. This search is aided by a search space and constructor. The search space defines searchable hyperparameters, such as precision type: `Binary` and bit width: `weight_widths`. The constructor defines the control flow for choosing a set of hyperparameters per layer or globally, and then instantiating a copy of the original model with each target layer replaced with the quantised versions. The following work investigates mixed precision search for quantising `torch.nn.Linear` layers only. Linear layers may remain full precision (FP32), but best results were observed when the layers are quantized. The baseline for this is the LoRA 1 epoch fine-tuned bert-tiny model obtained from Tutorial 2. Despite any accuracy improvement over the baseline is an artefact of more fine tuning, it is still informative to know how performance degrades relative to a baseline, and thus was included.
 
-The following plot shows Mixed Precision Search for 30 trials. 
+## Mixed Precision Search for 30 trials
 ![Figure 2: Curve for Mixed-Precision Search for 30 trials](imgs/Lab3Task2_1.png)
 
 ### Evaluation
@@ -169,13 +170,12 @@ By counting the number of bits of affected layers for each model, we can calcula
 
 ![Figure 3: Memory Foot Print and Accuracy Comparison Baseline vs. Mixed-Precision](imgs/Lab3_Task_2_Plot2.png)
 
-Memory efficiency does not scale with bit count as each module has different number of weights, so achieving low bit count on a layer with low number of weights is not very impactful. However, from a efficiency standpoint, the results above illustrate that full mixed precision quantisation achieves a signficant 51.9% unified memory reduction in the linear layers, significantly more efficient than both the baseline and single type mixed precision model. One noticeable difference between the full mixed precision search conducted in Task 2 and the `LinearInteger` type mixed precision search conducted in Task 1 is that the single type search decided not to quantise the final classifier, whilst the full precision search quantised this module into `LinearLog` precision, saving 24 bits per weight. 
-This proves Mase, combined with Optuna, achieves significant software-level efficient gains whilst also retaining edge performance, and removing the cumbersome process of manual and non-optimal search algorithms.
-
+Memory efficiency does not scale with bit count, as each module has a different number of weights, so achieving low bit count on a layer with a low number of weights is not very impactful. However, from an efficiency standpoint, the results above illustrate that full mixed precision quantisation achieves a significant 51.9% unified memory reduction in the linear layers, which is significantly more efficient than both the baseline and single-type mixed precision model. One noticeable difference between the full mixed precision search conducted in Task 2 and the `LinearInteger` type mixed precision search conducted in Task 1 is that the single type search decided not to quantise the final classifier, whilst the full precision search quantised this module into `LinearLog` precision, saving 24 bits per weight. Despite significant quantisation, the model (thanks to automated algorithmic hyperparameter search) still achieves a significant accuracy of 87.6%
+This investigation affirms that Mase, combined with Optuna, achieves significant software-level efficiency gains while also retaining edge performance and eliminating the cumbersome process of manual hyperparameter testing.
 
 The following plots show an ablation study of Static Precision Search for a maximum of 30 trials.
 - [ ] Line Plot of each precision
-- [ ] Anaylsis and Evaluation
+- [ ]
 
 
 ## Lab 4

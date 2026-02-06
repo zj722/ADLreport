@@ -78,7 +78,7 @@ The L1/L1 strategy is clearly the most robust as sparsity increases: accuracy st
 ## Lab 2
 
 ### Overview 
-In Tutorial 5, we implemented the NAS(neural Architecture Search) using optuna with different search sampler including Grid, Random and TPE-based search. 
+In Tutorial 5, we implemented the NAS (neural Architecture Search) using optuna with different search sampler including Grid, Random and TPE-based search. 
 
 #### Task 1: Best-so-far Accuracy Comparison between TPE and Grid Samplers
 In Task 1, we compare the accuracy and search efficiency of the TPE sampler and the Grid sampler by running neural architecture search (NAS) for a fixed number of trials. Figure 2_1 shows the best-so-far accuracy over trials together with the results of individual evaluations. This metric reflects how efficiently each sampler discovers high-performing model architectures under a limited search budget.

@@ -6,7 +6,7 @@
 |---------------|----------|
 | Zhihao Jia    | 02215217 |
 | Tingxu Chen   | 02221097 |
-| Hong Huang    | xxxxxxxx |
+| Hong Huang    | 06047205 |
 | Leon Hausmann | 06046667 |
 
 ## Lab 0
@@ -182,9 +182,19 @@ By counting the number of bits of affected layers for each model, we can calcula
 Memory efficiency does not scale with bit count, as each module has a different number of weights, so achieving low bit count on a layer with a low number of weights is not very impactful. However, from an efficiency standpoint, the results above illustrate that full mixed precision quantisation achieves a significant 51.9% unified memory reduction in the linear layers, which is significantly more efficient than both the baseline and single-type mixed precision model. One noticeable difference between the full mixed precision search conducted in Task 2 and the `LinearInteger` type mixed precision search conducted in Task 1 is that the single type search decided not to quantise the final classifier, whilst the full precision search quantised this module into `LinearLog` precision, saving 24 bits per weight. Despite significant quantisation, the model (thanks to automated algorithmic hyperparameter search) still achieves a significant accuracy of 87.6%
 This investigation affirms that Mase, combined with Optuna, achieves significant software-level efficiency gains while also retaining edge performance and eliminating the cumbersome process of manual hyperparameter testing.
 
-The following plots show an ablation study of Static Precision Search for a maximum of 30 trials.
-- [ ] Line Plot of each precision
-- [ ]
+## Ablation Study of Quantization Precision Types (30 Trials)
+
+![Figure 5: Ablation Study of Quantization Precision Types](imgs/Lab3_Task2_Fig3.png)
+
+
+The striking result is that the model is largely insensitive to the choice of quantization scheme. Whether using `LinearInteger`, `LinearLog`, `LinearMinifloat`, or even `LinearTernary`, the global best accuracy consistently converged to the same high (~87%) ceiling. This implies that, as long as the bit-width configurations are adequate (for example, sufficient data widths and fractional widths), the specific quantization precision (Log, Int or Float) matters very little for this architecture. 
+
+The only precisions that induced significant performance degradation are `LinearBinaryScaling`, `LinearBinary`, `LinearBlockMinifloat`, and `LinearTernary`.
+
+`LinearBinary` (79%): Reducing weights and biases to 1-bit (sign-only information) caused a distinct reduction in accuracy that did not fully recover. This indicates that while the model is robust, pure sign information is insufficient to retain top evaluation accuracy.
+`LinearBinaryScaling` (50%): This quantisation strategy completely failed and returned to random guessing. One main difference between `LinearBinary` and `LinearBinaryScaling` is that the former keeps biases at full precision, whilst the latter binarises the biases. As a result, it can be concluded that binary quantisation of weights and biases is too aggressive of a quantization scheme. `LinearBlockMinifloat` can be seen struggling to recover performance in earlier trials, but eventually succeeds in finding a configuration that recovers most of the loss. This suggests that this precision is justifiable; however, it can be inefficient to search for. 
+
+For this specific task, `LinearTernary` is the most optimal (87.78%) quantization precision if a singular precision is to be used. This precision quickly finds and recovers a per-layer configuration of full evaluation accuracy in just 6 trials. Any precision above this level yields zero significant performance improvement, whilst also being less memory efficient than ternary quantization. Earlier mixed precision results find a lower accuracy configuration, and this is explained by use of non-exhaustive search. The chosen sampler is does not systematically loop through every precision testing all choices before moving to the next precision. Every quantizable linear layer has a choice to be any of the instantiated precisions, hence the search frontier had yet expanded this Ternary configuration and logged it as the best.[ ]
 
 
 ## Lab 4

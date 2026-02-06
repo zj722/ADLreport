@@ -1,5 +1,14 @@
 # ADLS Reports 
 
+## Group Members
+
+| Name          | CID      |
+|---------------|----------|
+| Zhihao Jia    | 02215217 |
+| Tingxu Chen   | 02221097 |
+| Hong Huang    | xxxxxxxx |
+| Leon Hausmann | 06046667 |
+
 ## Lab 0
 
 ### What we should do and what we did
